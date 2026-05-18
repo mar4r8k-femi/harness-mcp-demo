@@ -12,6 +12,7 @@ describe("quotes routes", () => {
         id: expect.any(String),
         quote: expect.any(String),
         author: expect.any(String),
+        category: expect.any(String),
       }),
     );
   });
