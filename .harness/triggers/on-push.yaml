@@ -1,0 +1,28 @@
+trigger:
+  name: On Push - All Branches
+  identifier: on_push_all_branches
+  enabled: true
+  orgIdentifier: default
+  projectIdentifier: harness_mcp_demo
+  pipelineIdentifier: ci_cd_pipeline
+  source:
+    type: Webhook
+    spec:
+      type: Github
+      spec:
+        type: Push
+        spec:
+          connectorRef: github_connector
+          autoAbortPreviousExecutions: true
+          actions:
+            - Push
+  inputYaml: |
+    pipeline:
+      identifier: ci_cd_pipeline
+      properties:
+        ci:
+          codebase:
+            build:
+              type: branch
+              spec:
+                branch: <+trigger.branch>

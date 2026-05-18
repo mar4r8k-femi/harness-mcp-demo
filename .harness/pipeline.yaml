@@ -1,0 +1,106 @@
+pipeline:
+  name: CI/CD Pipeline
+  identifier: ci_cd_pipeline
+  projectIdentifier: harness_mcp_demo
+  orgIdentifier: default
+  tags:
+    managed-by: git
+
+  properties:
+    ci:
+      codebase:
+        connectorRef: github_connector
+        repoName: harness-mcp-demo
+        build: <+input>
+
+  stages:
+    - stage:
+        name: Build & Test
+        identifier: ci_stage
+        type: CI
+        spec:
+          cloneCodebase: true
+          caching:
+            enabled: true
+            paths:
+              - node_modules
+          execution:
+            steps:
+              - step:
+                  name: Run Tests
+                  identifier: run_tests
+                  type: Run
+                  spec:
+                    image: node:20-alpine
+                    command: |
+                      npm ci --prefer-offline
+                      npm test -- --ci --forceExit
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - junit.xml
+
+              - step:
+                  name: Build & Push Image
+                  identifier: build_push
+                  type: BuildAndPushDockerRegistry
+                  spec:
+                    connectorRef: docker_registry_connector
+                    repo: your-org/quote-service
+                    tags:
+                      - <+trigger.commitSha>
+                      - latest
+                    buildArgs:
+                      GIT_SHA: <+trigger.commitSha>
+                    remoteCacheImage: your-org/quote-service:cache
+
+    - stage:
+        name: Deploy to k8s-demo
+        identifier: cd_stage
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: quote_service
+            serviceInputs:
+              serviceDefinition:
+                spec:
+                  artifacts:
+                    primary:
+                      sources:
+                        - identifier: docker
+                          spec:
+                            tag: <+trigger.commitSha>
+          environment:
+            environmentRef: k8s_demo
+            infrastructureDefinitions:
+              - identifier: k8s_demo_infra
+          execution:
+            steps:
+              - step:
+                  name: Rolling Deploy
+                  identifier: rolling_deploy
+                  type: K8sRollingDeploy
+                  timeout: 2m
+                  spec:
+                    skipDryRun: false
+
+              - step:
+                  name: Health Check
+                  identifier: health_check
+                  type: Run
+                  spec:
+                    image: curlimages/curl:latest
+                    command: |
+                      sleep 10
+                      curl -sf http://quote-service.harness-mcp-demo.svc/health \
+                        | grep -q '"status":"ok"'
+                    timeout: 30s
+
+            rollbackSteps:
+              - step:
+                  name: Rollback
+                  identifier: rollback
+                  type: K8sRollingRollback
+                  spec: {}

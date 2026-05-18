@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.git
+.gitignore
+.env
+.env.local
+junit.xml
+.DS_Store
+.vscode
+.harness
+k8s
+*.md
