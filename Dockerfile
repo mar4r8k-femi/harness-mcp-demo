@@ -22,6 +22,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev --prefer-offline --no-audit --no-fund \
  && npm cache clean --force
 COPY --from=build /app/dist ./dist
+COPY dist/missing.js ./dist/missing.js
 USER node
 EXPOSE 3000
 CMD ["node", "dist/index.js"]
