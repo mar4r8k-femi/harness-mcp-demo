@@ -5,14 +5,12 @@ pipeline:
   orgIdentifier: sandbox
   tags:
     managed-by: git
-
   properties:
     ci:
       codebase:
         connectorRef: github_connector
         repoName: harness-mcp-demo
         build: <+input>
-
   stages:
     - stage:
         name: Build and Test
@@ -46,21 +44,20 @@ pipeline:
                       spec:
                         paths:
                           - junit.xml
-
               - step:
                   name: Build and Push Image
                   identifier: build_push
                   type: BuildAndPushDockerRegistry
                   spec:
-                    connectorRef: docker_registry_connector
-                    repo: your-org/quote-service
+                    repo: mcp-package
                     tags:
-                      - <+trigger.commitSha>
+                      - 1.0.<+pipeline.sequenceId>
                       - latest
+                    caching: true
                     buildArgs:
                       GIT_SHA: <+trigger.commitSha>
-                    remoteCacheImage: your-org/quote-service:cache
-
+                    registryRef: mcp-demo
+        description: ""
     - stage:
         name: Deploy to k8s-demo
         identifier: cd_stage
@@ -74,20 +71,20 @@ pipeline:
         spec:
           deploymentType: Kubernetes
           service:
-            serviceRef: quote_service
+            serviceRef: quoteservice
             serviceInputs:
               serviceDefinition:
+                type: Kubernetes
                 spec:
                   artifacts:
                     primary:
-                      sources:
-                        - identifier: docker
-                          spec:
-                            tag: <+trigger.commitSha>
+                      primaryArtifactRef: <+input>
+                      sources: <+input>
           environment:
-            environmentRef: k8s_demo
+            environmentRef: prod
+            deployToAll: false
             infrastructureDefinitions:
-              - identifier: k8s_demo_infra
+              - identifier: mcpinfra
           execution:
             steps:
               - step:
@@ -101,14 +98,12 @@ pipeline:
                       spec:
                         count: 1
                     skipDryRun: false
-
               - step:
                   name: Canary Delete
                   identifier: canary_delete
                   type: K8sCanaryDelete
                   timeout: 10m
                   spec: {}
-
               - step:
                   name: Rolling Deployment
                   identifier: rolling_deployment
@@ -116,7 +111,6 @@ pipeline:
                   timeout: 10m
                   spec:
                     skipDryRun: false
-
               - step:
                   name: Health Check
                   identifier: health_check
@@ -128,7 +122,6 @@ pipeline:
                       curl -sf http://quote-service.harness-mcp-demo.svc/health \
                         | grep -q '"status":"ok"'
                     timeout: 30s
-
             rollbackSteps:
               - step:
                   name: Canary Delete
@@ -136,10 +129,10 @@ pipeline:
                   type: K8sCanaryDelete
                   timeout: 10m
                   spec: {}
-
               - step:
                   name: Rolling Rollback
                   identifier: rolling_rollback
                   type: K8sRollingRollback
                   timeout: 10m
                   spec: {}
+        tags: {}
