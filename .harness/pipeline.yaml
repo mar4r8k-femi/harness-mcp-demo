@@ -15,7 +15,7 @@ pipeline:
 
   stages:
     - stage:
-        name: Build & Test
+        name: Build and Test
         identifier: ci_stage
         type: CI
         spec:
@@ -48,7 +48,7 @@ pipeline:
                           - junit.xml
 
               - step:
-                  name: Build & Push Image
+                  name: Build and Push Image
                   identifier: build_push
                   type: BuildAndPushDockerRegistry
                   spec:
@@ -65,6 +65,12 @@ pipeline:
         name: Deploy to k8s-demo
         identifier: cd_stage
         type: Deployment
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
         spec:
           deploymentType: Kubernetes
           service:
