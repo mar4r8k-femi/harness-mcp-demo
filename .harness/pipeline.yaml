@@ -1,8 +1,8 @@
 pipeline:
-  name: CI/CD Pipeline
-  identifier: ci_cd_pipeline
-  projectIdentifier: harness_mcp_demo
-  orgIdentifier: default
+  name: Cadence E2E Delivery
+  identifier: Cadence_E2E_Delivery
+  projectIdentifier: Femi_Sandbox
+  orgIdentifier: sandbox
   tags:
     managed-by: git
 
