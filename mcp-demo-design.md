@@ -20,33 +20,16 @@ Because the pipeline YAML is in the repo, one commit can change the app *and* ho
 
 ## 2. Repository Layout
 
-```
-harness-mcp-demo/
-├── src/
-│   ├── index.ts
-│   ├── routes/
-│   │   ├── health.ts               # GET /health  →  { status, version }
-│   │   └── quotes.ts               # GET /quotes, GET /quotes/:id
-│   └── __tests__/
-│       ├── health.test.ts
-│       └── quotes.test.ts
-├── Dockerfile                      # Multi-stage, node:20-alpine final image
-├── package.json / tsconfig.json / jest.config.js
-├── k8s/
-│   ├── namespace.yaml
-│   ├── deployment.yaml             # 1 replica, imagePullPolicy: Always
-│   └── service.yaml
-├── .harness/
-│   ├── pipeline.yaml               # CI + CD pipeline (remote/git-backed)
-│   └── triggers/
-│       └── on-push.yaml
-├── CLAUDE.md                           # Claude workspace context
-├── .vscode/
-│   └── mcp.json                    # Harness MCP config
-└── .env.example
-```
+The repo root is the source of truth for both the app and its delivery pipeline. See the actual tree on disk; the load-bearing files are:
 
-**`.harness/` is the source of truth.** Harness Git Experience reads the pipeline YAML from the triggering git ref — a push to `feature/xyz` runs that branch's pipeline YAML, not main. Pipeline changes are PR-reviewed alongside app changes, and `git revert` rolls back both.
+- App code: [src/](src/) (entry [src/index.ts](src/index.ts), routes in [src/routes/](src/routes/), tests in [src/__tests__/](src/__tests__/))
+- Container: [Dockerfile](Dockerfile)
+- Kubernetes manifests: [k8s/](k8s/) (namespace, deployment, service)
+- Pipeline-as-code: [.harness/pipeline.yaml](.harness/pipeline.yaml), trigger in [.harness/triggers/on-push.yaml](.harness/triggers/on-push.yaml)
+- IDE wiring: [.vscode/mcp.json](.vscode/mcp.json), [CLAUDE.md](CLAUDE.md)
+- Build/runtime config: [package.json](package.json), [tsconfig.json](tsconfig.json), [jest.config.js](jest.config.js), [.env.example](.env.example)
+
+**[.harness/](.harness/) is the source of truth for delivery.** Harness Git Experience reads the pipeline YAML from the triggering git ref — a push to `feature/xyz` runs that branch's pipeline YAML, not main. Pipeline changes are PR-reviewed alongside app changes, and `git revert` rolls back both.
 
 ---
 
@@ -54,15 +37,17 @@ harness-mcp-demo/
 
 Minimal TypeScript/Express microservice. Stateless, no database, fast build.
 
-```
-GET /health      →  { "status": "ok", "version": "<GIT_SHA>" }
-GET /quotes      →  { "quote": "...", "author": "..." }
-GET /quotes/:id  →  200 | 404
-```
+Endpoints (defined in [src/routes/](src/routes/)):
 
-`GIT_SHA` injected via `ARG GIT_SHA` in the Dockerfile — curl `/health` after deploy to confirm which commit is live.
+| Method | Path | Returns |
+|---|---|---|
+| GET | `/health` | `{ status, version }` — version is the deployed `GIT_SHA` |
+| GET | `/quotes` | a random quote object |
+| GET | `/quotes/:id` | 200 with the quote, or 404 |
 
-Tests: `health.test.ts` (200 + status ok) and `quotes.test.ts` (schema + known IDs). One-line edits break them on demand for the failure demo.
+`GIT_SHA` is injected via `ARG GIT_SHA` in [Dockerfile](Dockerfile) and surfaced as `process.env.GIT_SHA` — curling `/health` after deploy confirms which commit is live.
+
+Tests in [src/__tests__/](src/__tests__/) cover both routes. One-line edits break them on demand for the failure demo (see §8).
 
 ---
 
@@ -86,132 +71,43 @@ Total warm:  ~95 s  ✓
 Total cold: ~115 s  ✓
 ```
 
+The full stage/step definitions live in [.harness/pipeline.yaml](.harness/pipeline.yaml).
+
 ---
 
 ## 5. Pipeline-as-Code & Trigger
 
-**`.harness/triggers/on-push.yaml`**
-```yaml
-trigger:
-  name: On Push - All Branches
-  identifier: on_push_all_branches
-  enabled: true
-  orgIdentifier: default
-  projectIdentifier: harness_mcp_demo
-  pipelineIdentifier: ci_cd_pipeline
-  source:
-    type: Webhook
-    spec:
-      type: Github
-      spec:
-        type: Push
-        spec:
-          connectorRef: github_connector
-          autoAbortPreviousExecutions: true
-          actions: [Push]
-  inputYaml: |
-    pipeline:
-      identifier: ci_cd_pipeline
-      properties:
-        ci:
-          codebase:
-            build:
-              type: branch
-              spec:
-                branch: <+trigger.branch>
-```
+The push trigger is defined in [.harness/triggers/on-push.yaml](.harness/triggers/on-push.yaml). Key behaviors:
 
-`autoAbortPreviousExecutions: true` cancels in-flight runs on fast successive pushes.
+- Listens on `github_connector` for `Push` events on **all branches**.
+- Sets the codebase build to the pushed branch via `<+trigger.branch>`, so each branch builds its own [.harness/pipeline.yaml](.harness/pipeline.yaml).
+- `autoAbortPreviousExecutions: true` cancels in-flight runs on fast successive pushes — the most recent commit wins.
 
 ---
 
 ## 6. MCP Configuration
 
-**`.vscode/mcp.json`**
-```json
-{
-  "servers": {
-    "harness": {
-      "type": "stdio",
-      "command": "npx",
-      "args": ["-y", "harness-mcp-v2"],
-      "env": {
-        "HARNESS_API_KEY": "${env:HARNESS_API_KEY}",
-        "HARNESS_PROJECT": "harness_mcp_demo",
-        "HARNESS_ORG": "default",
-        "HARNESS_TOOLSETS": "pipelines,logs,services,environments,connectors"
-      }
-    }
-  }
-}
-```
+The Harness MCP server is registered in [.vscode/mcp.json](.vscode/mcp.json) and auto-activates on folder open. It runs over stdio via `npx harness-mcp-v2`, pulls `HARNESS_API_KEY` from the environment, and pins the project (`harness_mcp_demo`), org (`default`), and toolsets (`pipelines,logs,services,environments,connectors`). Scoping the toolsets improves tool-selection accuracy.
 
-Auto-activates on folder open. `HARNESS_TOOLSETS` scopes the server to CI/CD resources only, improving tool-selection accuracy.
-
-**`CLAUDE.md`**
-```markdown
-# harness-mcp-demo
-
-Harness MCP is connected. Use it to:
-- Check status:    harness_status
-- Debug failures:  harness_diagnose
-- View logs:       harness_get(execution_log)
-- List runs:       harness_list(execution)
-- Trigger a run:   harness_execute(pipeline, run)
-
-Project: harness_mcp_demo  |  Pipeline: ci_cd_pipeline
-Service: quote-service     |  Env: k8s-demo
-```
+[CLAUDE.md](CLAUDE.md) holds the workspace context Claude reads on session start: which MCP tools are wired up, the project/pipeline/service/env identifiers, and a pointer to the demo branches.
 
 ---
 
 ## 7. MCP Demo Scenarios
 
-### A — Post-push status
-> "Show me the health of my project and the last 5 runs."
-```
-harness_status(project_id="harness_mcp_demo", include_visual=true)
-harness_list(resource_type="execution", size=5)
-```
+Each scenario shows the user prompt and the MCP tools it should resolve to. Tool names are per the Harness MCP Server reference — see https://developer.harness.io/docs/platform/harness-ai/harness-mcp-server.
 
-### B — Failure triage
-> "My last CI run failed. What went wrong?"
-```
-harness_list(resource_type="execution", size=1)
-harness_diagnose(execution_id="<id>")
-harness_get(resource_type="execution_log", resource_id="<step_id>")
-```
+**A — Post-push status.** *"Show me the health of my project and the last 5 runs."* → `harness_status` for the project, then `harness_list` over `execution` (size 5).
 
-### C — Trigger from IDE
-> "Run the pipeline on feature/add-quotes."
-```
-harness_get(resource_type="runtime_input_template", resource_id="ci_cd_pipeline")
-harness_execute(resource_type="pipeline", action="run",
-  resource_id="ci_cd_pipeline", inputs={"branch": "feature/add-quotes"})
-```
+**B — Failure triage.** *"My last CI run failed. What went wrong?"* → `harness_list` for the latest execution → `harness_diagnose` on its id → `harness_get` on the failing step's `execution_log` for the raw output.
 
-### D — Pipeline architecture
-> "Draw the pipeline structure."
-```
-harness_diagnose(resource_id="ci_cd_pipeline", visual_type="architecture")
-```
+**C — Trigger from IDE.** *"Run the pipeline on feature/add-quotes."* → `harness_get` for the runtime input template → `harness_execute` (`pipeline`, `run`) with `branch: feature/add-quotes`.
 
-### E — Deployment readiness
-> "Is anything blocking deployment to k8s-demo?"
-```
-harness_list(resource_type="connector")
-harness_list(resource_type="delegate")
-harness_list(resource_type="execution", size=5)
-```
+**D — Pipeline architecture.** *"Draw the pipeline structure."* → `harness_diagnose` against `ci_cd_pipeline` with `visual_type=architecture` for an inline diagram.
 
-### F — Regression hunt
-> "Pipeline was green yesterday, failed today. What changed?"
-```
-harness_list(resource_type="execution", size=5)
-harness_get(resource_type="execution", resource_id="<id-1>")
-harness_get(resource_type="execution", resource_id="<id-2>")
-harness_diagnose(execution_id="<failing-id>")
-```
+**E — Deployment readiness.** *"Is anything blocking deployment to k8s-demo?"* → `harness_list` over `connector`, `delegate`, and recent `execution` results.
+
+**F — Regression hunt.** *"Pipeline was green yesterday, failed today. What changed?"* → `harness_list` recent executions → `harness_get` on the last green and first red → `harness_diagnose` on the failing one.
 
 ---
 
@@ -238,122 +134,17 @@ harness_diagnose(execution_id="<failing-id>")
 | `k8s_cluster_connector` | Kubernetes connector | CD target |
 | `k8s-demo` | Environment | `PreProduction` |
 | `k8s-demo-infra` | Infrastructure | Namespace: `harness-mcp-demo` |
-| `quote-service` | Service | References `k8s/` manifests |
+| `quote-service` | Service | References [k8s/](k8s/) manifests |
 | `harness_mcp_demo` | Project | Scope for all resources |
 
 ---
 
-## 10. Pipeline YAML (`.harness/pipeline.yaml`)
+## 10. Pipeline Definition
 
-```yaml
-pipeline:
-  name: CI/CD Pipeline
-  identifier: ci_cd_pipeline
-  projectIdentifier: harness_mcp_demo
-  orgIdentifier: default
-  tags:
-    managed-by: git
+The full pipeline (CI build/test/push, CD rolling deploy + health check + rollback) is defined in [.harness/pipeline.yaml](.harness/pipeline.yaml). Highlights:
 
-  properties:
-    ci:
-      codebase:
-        connectorRef: github_connector
-        repoName: harness-mcp-demo
-        build: <+input>
-
-  stages:
-
-    - stage:
-        name: Build & Test
-        identifier: ci_stage
-        type: CI
-        spec:
-          cloneCodebase: true
-          caching:
-            enabled: true
-            paths: [node_modules]
-          execution:
-            steps:
-
-              - step:
-                  name: Run Tests
-                  identifier: run_tests
-                  type: Run
-                  spec:
-                    image: node:20-alpine
-                    command: |
-                      npm ci --prefer-offline
-                      npm test -- --ci --forceExit
-                    reports:
-                      type: JUnit
-                      spec:
-                        paths: ["junit.xml"]
-
-              - step:
-                  name: Build & Push Image
-                  identifier: build_push
-                  type: BuildAndPushDockerRegistry
-                  spec:
-                    connectorRef: docker_registry_connector
-                    repo: your-org/quote-service
-                    tags:
-                      - <+trigger.commitSha>
-                      - latest
-                    buildArgs:
-                      GIT_SHA: <+trigger.commitSha>
-                    remoteCacheImage: your-org/quote-service:cache
-
-    - stage:
-        name: Deploy to k8s-demo
-        identifier: cd_stage
-        type: Deployment
-        spec:
-          deploymentType: Kubernetes
-          service:
-            serviceRef: quote_service
-            serviceInputs:
-              serviceDefinition:
-                spec:
-                  artifacts:
-                    primary:
-                      sources:
-                        - identifier: docker
-                          spec:
-                            tag: <+trigger.commitSha>
-          environment:
-            environmentRef: k8s_demo
-            infrastructureDefinitions:
-              - identifier: k8s_demo_infra
-          execution:
-            steps:
-
-              - step:
-                  name: Rolling Deploy
-                  identifier: rolling_deploy
-                  type: K8sRollingDeploy
-                  timeout: 2m
-                  spec:
-                    skipDryRun: false
-
-              - step:
-                  name: Health Check
-                  identifier: health_check
-                  type: Run
-                  spec:
-                    image: curlimages/curl:latest
-                    command: |
-                      sleep 10
-                      curl -sf http://quote-service.harness-mcp-demo.svc/health \
-                        | grep -q '"status":"ok"'
-                    timeout: 30s
-
-            rollbackSteps:
-              - step:
-                  name: Rollback
-                  identifier: rollback
-                  type: K8sRollingRollback
-                  spec: {}
-```
+- **CI stage** clones the repo, restores `node_modules` via Harness Cache Intelligence, runs `npm test` with JUnit reporting, then builds and pushes the image with `<+trigger.commitSha>` baked in as the `GIT_SHA` build arg and image tag.
+- **CD stage** deploys to the `k8s_demo` environment using `K8sRollingDeploy`, then curls `/health` from inside the cluster and asserts `"status":"ok"`. A `K8sRollingRollback` rollback step runs if any step in the stage fails.
 
 ---
 
@@ -374,11 +165,11 @@ pipeline:
 ## 12. Demo Script
 
 **Act 1 — Setup (1 min)**
-Open the repo in VS Code. Show `src/` and `.harness/pipeline.yaml` side by side.
+Open the repo in VS Code. Show [src/](src/) and [.harness/pipeline.yaml](.harness/pipeline.yaml) side by side.
 > "One push, one webhook, one pipeline — build, test, and deploy."
 
 **Act 2 — Green path (2 min)**
-Add a quote to `src/data/quotes.ts`, push. In Claude:
+Add a quote to [src/data/quotes.ts](src/data/quotes.ts), push. In Claude:
 > "What's the status of my pipeline?" → `harness_status` (running → green)
 > "Show me the pipeline architecture." → inline diagram
 
