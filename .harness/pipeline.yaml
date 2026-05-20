@@ -1,6 +1,6 @@
 pipeline:
-  name: Cadence E2E Delivery
-  identifier: Cadence_E2E_Delivery
+  name: harness-mcp-demo
+  identifier: harness_mcp_demo
   projectIdentifier: Femi_Sandbox
   orgIdentifier: sandbox
   tags:
