@@ -1,8 +1,8 @@
 pipeline:
-  name: CI/CD Pipeline
-  identifier: ci_cd_pipeline
-  projectIdentifier: harness_mcp_demo
-  orgIdentifier: default
+  name: harness-mcp-demo
+  identifier: harness_mcp_demo
+  projectIdentifier: Femi_Sandbox
+  orgIdentifier: sandbox
   tags:
     managed-by: git
 
@@ -15,11 +15,17 @@ pipeline:
 
   stages:
     - stage:
-        name: Build & Test
+        name: Build and Test
         identifier: ci_stage
         type: CI
         spec:
           cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
           caching:
             enabled: true
             paths:
@@ -42,7 +48,7 @@ pipeline:
                           - junit.xml
 
               - step:
-                  name: Build & Push Image
+                  name: Build and Push Image
                   identifier: build_push
                   type: BuildAndPushDockerRegistry
                   spec:
@@ -59,6 +65,12 @@ pipeline:
         name: Deploy to k8s-demo
         identifier: cd_stage
         type: Deployment
+        failureStrategies:
+          - onFailure:
+              errors:
+                - AllErrors
+              action:
+                type: StageRollback
         spec:
           deploymentType: Kubernetes
           service:
@@ -79,10 +91,29 @@ pipeline:
           execution:
             steps:
               - step:
-                  name: Rolling Deploy
-                  identifier: rolling_deploy
+                  name: Canary Deployment
+                  identifier: canary_deployment
+                  type: K8sCanaryDeploy
+                  timeout: 10m
+                  spec:
+                    instanceSelection:
+                      type: Count
+                      spec:
+                        count: 1
+                    skipDryRun: false
+
+              - step:
+                  name: Canary Delete
+                  identifier: canary_delete
+                  type: K8sCanaryDelete
+                  timeout: 10m
+                  spec: {}
+
+              - step:
+                  name: Rolling Deployment
+                  identifier: rolling_deployment
                   type: K8sRollingDeploy
-                  timeout: 2m
+                  timeout: 10m
                   spec:
                     skipDryRun: false
 
@@ -100,7 +131,15 @@ pipeline:
 
             rollbackSteps:
               - step:
-                  name: Rollback
-                  identifier: rollback
+                  name: Canary Delete
+                  identifier: rollback_canary_delete
+                  type: K8sCanaryDelete
+                  timeout: 10m
+                  spec: {}
+
+              - step:
+                  name: Rolling Rollback
+                  identifier: rolling_rollback
                   type: K8sRollingRollback
+                  timeout: 10m
                   spec: {}
