@@ -91,10 +91,29 @@ pipeline:
           execution:
             steps:
               - step:
-                  name: Rolling Deploy
-                  identifier: rolling_deploy
+                  name: Canary Deployment
+                  identifier: canary_deployment
+                  type: K8sCanaryDeploy
+                  timeout: 10m
+                  spec:
+                    instanceSelection:
+                      type: Count
+                      spec:
+                        count: 1
+                    skipDryRun: false
+
+              - step:
+                  name: Canary Delete
+                  identifier: canary_delete
+                  type: K8sCanaryDelete
+                  timeout: 10m
+                  spec: {}
+
+              - step:
+                  name: Rolling Deployment
+                  identifier: rolling_deployment
                   type: K8sRollingDeploy
-                  timeout: 2m
+                  timeout: 10m
                   spec:
                     skipDryRun: false
 
@@ -112,7 +131,15 @@ pipeline:
 
             rollbackSteps:
               - step:
-                  name: Rollback
-                  identifier: rollback
+                  name: Canary Delete
+                  identifier: rollback_canary_delete
+                  type: K8sCanaryDelete
+                  timeout: 10m
+                  spec: {}
+
+              - step:
+                  name: Rolling Rollback
+                  identifier: rolling_rollback
                   type: K8sRollingRollback
+                  timeout: 10m
                   spec: {}
